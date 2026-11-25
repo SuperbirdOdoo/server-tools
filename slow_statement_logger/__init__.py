@@ -5,8 +5,6 @@ import logging
 import os
 import time
 
-import psycopg2
-
 from odoo import sql_db
 from odoo.tools import config
 
@@ -20,22 +18,24 @@ if ENV_VAR in os.environ:
 
 
 class SlowStatementLoggingCursor(sql_db.Cursor):
-    def execute(self, query, params=None, log_exceptions=None):
-        if LOG_MIN_DURATION_STATEMENT >= 0:
-            start = time.perf_counter()
-            res = super().execute(query, params, log_exceptions)
-            duration = (time.perf_counter() - start) * 1000.0
-            if duration >= LOG_MIN_DURATION_STATEMENT:
-                # same logging technique as Odoo in sql_log mode
-                encoding = psycopg2.extensions.encodings[self.connection.encoding]
-                _logger.debug(
-                    "duration: %.3f ms  statement: %s",
-                    duration,
-                    self._obj.mogrify(query, params).decode(encoding, "replace"),
-                )
-            return res
-        else:
+    def execute(self, query, params=None, log_exceptions=True):
+        """Log statements slower than ``log_min_duration_statement``.
+
+        Odoo 20 passes ``SQL`` objects. ``Cursor._format`` renders them the
+        same way as the core SQL debug log.
+        """
+        if LOG_MIN_DURATION_STATEMENT < 0:
             return super().execute(query, params, log_exceptions)
+        start = time.perf_counter()
+        res = super().execute(query, params, log_exceptions)
+        duration = (time.perf_counter() - start) * 1000.0
+        if duration >= LOG_MIN_DURATION_STATEMENT:
+            _logger.debug(
+                "duration: %.3f ms  statement: %s",
+                duration,
+                self._format(query, params, color_highlight=False),
+            )
+        return res
 
 
 sql_db.Cursor = SlowStatementLoggingCursor
